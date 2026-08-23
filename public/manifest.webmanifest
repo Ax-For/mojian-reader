@@ -1,0 +1,31 @@
+{
+  "name": "墨简 · 本地阅读器",
+  "short_name": "墨简",
+  "description": "隐私优先的本地 EPUB、TXT 与 Markdown 阅读器",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f3ef",
+  "theme_color": "#222624",
+  "icons": [
+    {
+      "src": "/mojian-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/mojian-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/mojian-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
