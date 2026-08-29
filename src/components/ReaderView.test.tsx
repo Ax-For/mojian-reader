@@ -273,6 +273,20 @@ describe('ReaderView interactions', () => {
     nowSpy.mockRestore()
   })
 
+  it('opens a bounded story map and jumps to a nearby chapter', async () => {
+    const user = userEvent.setup()
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    renderReader({ marks: [savedBookmark] })
+
+    await user.click(screen.getByRole('button', { name: /故事地图/ }))
+    const map = screen.getByRole('navigation', { name: '故事地图' })
+    expect(within(map).getByText(/已探索 \d+ \/ \d+ 章/)).toBeInTheDocument()
+    expect(within(map).getByText('1 条阅读记录')).toBeInTheDocument()
+    await user.click(within(map).getByRole('button', { name: '跳转到故事地图章节 第二章 一段安静的时间' }))
+    expect(scrollIntoView).toHaveBeenCalled()
+  })
+
   it('returns to explicit reading locations and can move forward again', async () => {
     const user = userEvent.setup()
     Element.prototype.scrollIntoView = vi.fn()

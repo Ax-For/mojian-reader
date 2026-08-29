@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  BarChart3,
   Bookmark,
   BookOpen,
+  BookOpenCheck,
   ChevronRight,
+  CircleDashed,
   Clock3,
   Download,
   FileText,
   FolderOpen,
   Folders,
+  Highlighter,
   Library,
   LoaderCircle,
   MoreHorizontal,
@@ -15,6 +19,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Target,
   Upload,
   UploadCloud,
 } from 'lucide-react'
@@ -24,6 +29,15 @@ import { BookCover } from './BookCover'
 import { BookMetadataDialog } from './BookMetadataDialog'
 import { BookGroupManagerDialog } from './BookGroupManagerDialog'
 import { ReadingMarksWorkspace } from './ReadingMarksWorkspace'
+import { ReadingInsightsWorkspace } from './ReadingInsightsWorkspace'
+import {
+  buildResumeMemory,
+  buildSmartShelves,
+  loadReadingResumeSnapshot,
+  type SmartShelfId
+} from '../services/readingExperience'
+import { loadDailyReadingGoal, summarizeReadingActivity } from '../services/readingInsights'
+import { loadBookReadingStats } from '../services/readingStats'
 
 type LibraryFilter = 'all' | 'recent' | BookFormat
 
@@ -97,6 +111,8 @@ export function LibraryView({
   const searchInput = useRef<HTMLInputElement>(null)
   const [editingBook, setEditingBook] = useState<ReaderBook | null>(null)
   const [isGroupManagerOpen, setIsGroupManagerOpen] = useState(false)
+  const [smartShelfId, setSmartShelfId] = useState<SmartShelfId | null>(null)
+  const [dailyGoal, setDailyGoal] = useState(loadDailyReadingGoal)
 
   useEffect(() => {
     function focusSearch(event: KeyboardEvent) {
@@ -113,6 +129,12 @@ export function LibraryView({
     () => [...books].sort((a, b) => b.lastOpened - a.lastOpened),
     [books]
   )
+  const smartShelves = useMemo(() => buildSmartShelves(books, marks), [books, marks])
+  const activeSmartShelf = smartShelves.find((shelf) => shelf.id === smartShelfId) ?? null
+  const todayGoal = useMemo(
+    () => summarizeReadingActivity(books.map((book) => loadBookReadingStats(book.id)), dailyGoal),
+    [books, dailyGoal]
+  )
 
   const filteredBooks = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -125,11 +147,19 @@ export function LibraryView({
         (filter === 'recent' && book.progress > 0) ||
         book.format === filter
       const matchesGroup = !activeGroupId || book.groupIds?.includes(activeGroupId)
-      return matchesQuery && matchesFilter && matchesGroup
+      const matchesSmartShelf = !activeSmartShelf || activeSmartShelf.books.some((item) => item.id === book.id)
+      return matchesQuery && matchesFilter && matchesGroup && matchesSmartShelf
     })
-  }, [activeGroupId, filter, query, sortedBooks])
+  }, [activeGroupId, activeSmartShelf, filter, query, sortedBooks])
 
-  const continueBook = sortedBooks[0]
+  const continueBook = sortedBooks.find((book) => book.progress > 0 && book.progress < 100) ?? sortedBooks[0]
+  const continueMemory = useMemo(() => continueBook
+    ? buildResumeMemory(
+        continueBook,
+        marks,
+        loadReadingResumeSnapshot(continueBook.id)
+      )
+    : null, [continueBook, marks])
   const activeGroup = groups.find((group) => group.id === activeGroupId) ?? null
 
   function chooseFiles() {
@@ -139,14 +169,29 @@ export function LibraryView({
 
   function showLibrary(nextFilter: LibraryFilter) {
     setFilter(nextFilter)
+    setSmartShelfId(null)
     onSelectGroup(null)
     onSectionChange('library')
   }
 
   function showGroup(id: string) {
     setFilter('all')
+    setSmartShelfId(null)
     onSelectGroup(id)
     onSectionChange('library')
+  }
+
+  function showSmartShelf(id: SmartShelfId) {
+    setFilter('all')
+    setSmartShelfId(id)
+    onSelectGroup(null)
+    onSectionChange('library')
+  }
+
+  function showInsights() {
+    setSmartShelfId(null)
+    onSelectGroup(null)
+    onSectionChange('insights')
   }
 
   function handleDrop(event: React.DragEvent<HTMLElement>) {
@@ -178,7 +223,7 @@ export function LibraryView({
         <nav className="library-nav" aria-label="书架导航">
           <p className="sidebar-label">书库</p>
           <button
-            className={section === 'library' && filter === 'all' && !activeGroupId ? 'nav-item nav-item--active' : 'nav-item'}
+            className={section === 'library' && filter === 'all' && !activeGroupId && !smartShelfId ? 'nav-item nav-item--active' : 'nav-item'}
             type="button"
             onClick={() => showLibrary('all')}
           >
@@ -195,6 +240,14 @@ export function LibraryView({
             最近阅读
           </button>
           <button
+            className={section === 'insights' ? 'nav-item nav-item--active' : 'nav-item'}
+            type="button"
+            onClick={showInsights}
+          >
+            <BarChart3 size={18} />
+            阅读洞察
+          </button>
+          <button
             className={section === 'marks' ? 'nav-item nav-item--active' : 'nav-item'}
             type="button"
             onClick={() => {
@@ -206,6 +259,33 @@ export function LibraryView({
             书签与标注
             <span>{marks.length}</span>
           </button>
+
+          <p className="sidebar-label sidebar-label--spaced">智能书架</p>
+          <div className="smart-shelf-list">
+            {smartShelves.map((shelf) => {
+              const Icon = shelf.id === 'reading'
+                ? BookOpenCheck
+                : shelf.id === 'finishing'
+                  ? CircleDashed
+                  : shelf.id === 'stalled'
+                    ? Clock3
+                    : Highlighter
+              return (
+                <button
+                  key={shelf.id}
+                  type="button"
+                  className={section === 'library' && smartShelfId === shelf.id ? 'nav-item nav-item--active' : 'nav-item'}
+                  aria-label={`${shelf.label} ${shelf.books.length} 本`}
+                  title={shelf.description}
+                  onClick={() => showSmartShelf(shelf.id)}
+                >
+                  <Icon size={17} />
+                  <span className="nav-item__label">{shelf.label}</span>
+                  <span>{shelf.books.length}</span>
+                </button>
+              )
+            })}
+          </div>
 
           <div className="sidebar-section-heading">
             <p className="sidebar-label">自建分组</p>
@@ -245,6 +325,18 @@ export function LibraryView({
           </button>
         </nav>
 
+        <button
+          className="sidebar-reading-goal"
+          type="button"
+          aria-label={`今日阅读 ${todayGoal.todayMinutes}/${dailyGoal} 分钟`}
+          onClick={showInsights}
+        >
+          <Target size={17} />
+          <span>
+            <strong>今日 {todayGoal.todayMinutes} / {dailyGoal} 分钟</strong>
+            <i><b style={{ width: `${todayGoal.goalProgress}%` }} /></i>
+          </span>
+        </button>
         <div className="local-note">
           <ShieldCheck size={18} />
           <div>
@@ -283,7 +375,10 @@ export function LibraryView({
               aria-label={section === 'marks' ? '搜索书名、章节或标注' : '搜索书名、作者或备注'}
               placeholder={section === 'marks' ? '搜索书名、章节或标注' : '搜索书名、作者或备注'}
               value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
+              onChange={(event) => {
+                if (section === 'insights') onSectionChange('library')
+                onQueryChange(event.target.value)
+              }}
             />
             <kbd>⌘ K</kbd>
           </div>
@@ -365,13 +460,26 @@ export function LibraryView({
               onDeleteMark={onDeleteMark}
               onUpdateMark={onUpdateMark}
             />
+          ) : section === 'insights' ? (
+            <ReadingInsightsWorkspace
+              books={books}
+              marks={marks}
+              onOpenBook={onOpenBook}
+              onOpenMark={onOpenMark}
+              dailyGoal={dailyGoal}
+              onDailyGoalChange={setDailyGoal}
+            />
           ) : (
             <>
           <section className="page-heading">
             <div>
-              <p className="eyebrow">{activeGroup ? '自建分组' : '本地书库'}</p>
-              <h1>{activeGroup?.name ?? '我的书架'}</h1>
-              <p>{activeGroup ? `已收纳 ${filteredBooks.length} 本书，可从书籍管理入口调整归属。` : '导入、整理并继续阅读存放在设备上的书籍。'}</p>
+              <p className="eyebrow">{activeGroup ? '自建分组' : activeSmartShelf ? '智能书架' : '本地书库'}</p>
+              <h1>{activeGroup?.name ?? activeSmartShelf?.label ?? '我的书架'}</h1>
+              <p>{activeGroup
+                ? `已收纳 ${filteredBooks.length} 本书，可从书籍管理入口调整归属。`
+                : activeSmartShelf
+                  ? `${activeSmartShelf.description}，当前共 ${filteredBooks.length} 本。`
+                  : '导入、整理并继续阅读存放在设备上的书籍。'}</p>
             </div>
             <div className="sync-status">
               <span />
@@ -379,7 +487,7 @@ export function LibraryView({
             </div>
           </section>
 
-          {continueBook && !activeGroup && !query && filter === 'all' && (
+          {continueBook && continueMemory && !activeGroup && !activeSmartShelf && !query && filter === 'all' && (
             <section className="continue-section" aria-labelledby="continue-heading">
               <div className="section-heading">
                 <div>
@@ -402,7 +510,12 @@ export function LibraryView({
                 <div className="continue-copy">
                   <span className="book-kicker">{continueBook.format.toUpperCase()} · {continueBook.author}</span>
                   <h3>{continueBook.title}</h3>
-                  <p>你的阅读位置已保存在本地，可以从上次停下的地方继续。</p>
+                  <span className="continue-location">上次停在 · {continueMemory.chapterLabel}</span>
+                  <p className="continue-excerpt">{continueMemory.excerpt}</p>
+                  <div className="continue-memory-meta">
+                    <time dateTime={new Date(continueMemory.lastReadAt).toISOString()}>{continueMemory.timeLabel}</time>
+                    <span>{marks.filter((mark) => mark.bookId === continueBook.id).length} 条阅读记录</span>
+                  </div>
                   <div className="progress-track" aria-label={`阅读进度 ${continueBook.progress}%`}>
                     <span style={{ width: `${continueBook.progress}%` }} />
                   </div>
@@ -420,7 +533,7 @@ export function LibraryView({
             <div className="section-heading section-heading--shelf">
               <div>
                 <p className="eyebrow">{filteredBooks.length} 本书</p>
-                <h2 id="shelf-heading">{activeGroup ? '分组书籍' : '书架'}</h2>
+                <h2 id="shelf-heading">{activeGroup ? '分组书籍' : activeSmartShelf ? activeSmartShelf.label : '书架'}</h2>
               </div>
               <div className="filter-tabs" aria-label="书架筛选">
                 {FILTERS.map((item) => (
@@ -428,7 +541,10 @@ export function LibraryView({
                     key={item.id}
                     type="button"
                     className={filter === item.id ? 'filter-tab filter-tab--active' : 'filter-tab'}
-                    onClick={() => setFilter(item.id)}
+                    onClick={() => {
+                      setSmartShelfId(null)
+                      setFilter(item.id)
+                    }}
                   >
                     {item.label}
                   </button>

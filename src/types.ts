@@ -61,7 +61,7 @@ export type ReaderTheme = 'paper' | 'sepia' | 'night'
 export type ReaderFont = 'serif' | 'song' | 'sans'
 export type ReaderLayout = 'continuous' | 'double'
 
-export type LibrarySection = 'library' | 'marks'
+export type LibrarySection = 'library' | 'marks' | 'insights'
 export type ReadingMarkKind = 'bookmark' | 'annotation'
 
 export interface ReadingLocation {

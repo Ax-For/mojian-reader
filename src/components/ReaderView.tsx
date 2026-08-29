@@ -22,6 +22,7 @@ import {
   List,
   Languages,
   Maximize2,
+  MapPinned,
   MessageSquarePlus,
   MessageSquareText,
   Minus,
@@ -103,6 +104,8 @@ import { normalizeReadingBackground } from '../utils/bookMetadata'
 import { hasCurrentTextBookIndex } from '../utils/textBookIndex'
 import { formatBookContentStats } from '../utils/bookMetrics'
 import { BookMetadataDialog } from './BookMetadataDialog'
+import { StoryMapPanel } from './StoryMapPanel'
+import { saveReadingResumeSnapshot, type StoryMapChapter } from '../services/readingExperience'
 
 interface ReaderViewProps {
   book: ReaderBook
@@ -628,7 +631,7 @@ export function ReaderView({
   const [tocWidth, setTocWidth] = useState(initialPreferences.tocWidth)
   const [isTocResizing, setIsTocResizing] = useState(false)
   const [tocTitleTooltip, setTocTitleTooltip] = useState<TocTitleTooltipState | null>(null)
-  const [panelMode, setPanelMode] = useState<'toc' | 'marks'>(initialMark ? 'marks' : 'toc')
+  const [panelMode, setPanelMode] = useState<'toc' | 'map' | 'marks'>(initialMark ? 'marks' : 'toc')
   const [isSettingsOpen, setIsSettingsOpen] = useState(true)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -944,6 +947,54 @@ export function ReaderView({
       lastReadAt: stored?.lastReadAt
     }
   }
+  const storyMapChapters = useMemo<StoryMapChapter[]>(() => {
+    if (isRenderableEpub) {
+      const total = Math.max(1, epubToc.length)
+      return epubToc.map((chapter, chapterIndex) => {
+        const storageKey = epubChapterStorageKey(chapter, chapterIndex)
+        const stored = chapterReadingProgress[storageKey]
+        const chapterProgress = chapterIndex === activeEpubChapterIndex
+          ? Math.max(stored?.progress ?? 0, activeEpubChapterProgress)
+          : stored?.progress ?? 0
+        return {
+          id: storageKey,
+          title: chapter.label,
+          progress: chapterProgress,
+          startProgress: chapterIndex / total * 100,
+          endProgress: (chapterIndex + 1) / total * 100,
+          lastReadAt: stored?.lastReadAt
+        }
+      })
+    }
+
+    const paragraphTotal = Math.max(1, paragraphs.length - 1)
+    return chapterParagraphEntries.map((chapter, chapterPosition) => {
+      const storageKey = textChapterStorageKey(chapter)
+      const stored = chapterReadingProgress[storageKey]
+      const nextStart = chapterParagraphEntries[chapterPosition + 1]?.paragraphIndex ?? paragraphs.length
+      const chapterProgress = chapterPosition === activeTextChapterPosition
+        ? Math.max(stored?.progress ?? 0, activeTextChapterProgress)
+        : stored?.progress ?? 0
+      return {
+        id: storageKey,
+        title: chapter.title,
+        progress: chapterProgress,
+        startProgress: chapter.paragraphIndex / paragraphTotal * 100,
+        endProgress: Math.min(100, nextStart / paragraphTotal * 100),
+        lastReadAt: stored?.lastReadAt
+      }
+    })
+  }, [
+    activeEpubChapterIndex,
+    activeEpubChapterProgress,
+    activeTextChapterPosition,
+    activeTextChapterProgress,
+    chapterParagraphEntries,
+    chapterReadingProgress,
+    epubToc,
+    isRenderableEpub,
+    paragraphs.length
+  ])
   const textAnnotationsByParagraph = useMemo(() => {
     const byParagraph = new Map<number, ReadingMark[]>()
     for (const mark of marks) {
@@ -999,6 +1050,29 @@ export function ReaderView({
       Date.now()
     ))
   }, [activeChapterProgress, activeChapterStorageKey, book.id])
+
+  useEffect(() => {
+    const excerpt = isRenderableEpub
+      ? currentExcerpt
+      : paragraphs
+          .slice(currentTextIndex, currentTextIndex + 4)
+          .filter((paragraph) => !chapterTitles.has(paragraph))
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 320)
+    if (!excerpt) return
+    const timer = window.setTimeout(() => {
+      saveReadingResumeSnapshot({
+        bookId: book.id,
+        chapterLabel: currentLabel,
+        excerpt,
+        progress,
+        lastReadAt: Date.now()
+      })
+    }, 480)
+    return () => window.clearTimeout(timer)
+  }, [book.id, chapterTitles, currentExcerpt, currentLabel, currentTextIndex, isRenderableEpub, paragraphs, progress])
 
   useEffect(() => {
     setBookSpeechVoice(loadBookSpeechVoice(book.id))
@@ -1578,6 +1652,20 @@ export function ReaderView({
   function jumpToTextChapter(paragraphIndex: number) {
     rememberNavigationOrigin({ type: 'text', value: String(paragraphIndex) })
     jumpToTextLocation(paragraphIndex)
+  }
+
+  function openStoryMapChapter(chapterIndex: number) {
+    if (isRenderableEpub) {
+      const chapter = epubToc[chapterIndex]
+      if (!chapter) return
+      pauseAutoScrollForNavigation()
+      rememberNavigationOrigin({ type: 'epub', value: chapter.href })
+      setActiveEpubChapterIndex(chapterIndex)
+      setEpubLocation(chapter.href)
+      return
+    }
+    const chapter = chapterParagraphEntries[chapterIndex]
+    if (chapter) jumpToTextChapter(chapter.paragraphIndex)
   }
 
   function jumpToTextLocation(index: number, syncProgress = true) {
@@ -2621,8 +2709,16 @@ export function ReaderView({
           <button type="button" className={panelMode === 'toc' ? 'reader-panel-tab reader-panel-tab--active' : 'reader-panel-tab'} onClick={() => setPanelMode('toc')}>
             <List size={14} /> 目录
           </button>
-          <button type="button" className={panelMode === 'marks' ? 'reader-panel-tab reader-panel-tab--active' : 'reader-panel-tab'} onClick={() => setPanelMode('marks')}>
-            <Bookmark size={14} /> 阅读记录 <span>{marks.length}</span>
+          <button
+            type="button"
+            aria-label="故事地图"
+            className={panelMode === 'map' ? 'reader-panel-tab reader-panel-tab--active' : 'reader-panel-tab'}
+            onClick={() => setPanelMode('map')}
+          >
+            <MapPinned size={14} /> 地图
+          </button>
+          <button type="button" aria-label={`阅读记录 ${marks.length}`} className={panelMode === 'marks' ? 'reader-panel-tab reader-panel-tab--active' : 'reader-panel-tab'} onClick={() => setPanelMode('marks')}>
+            <Bookmark size={14} /> 记录 <span>{marks.length}</span>
           </button>
         </div>
         {panelMode === 'toc' ? (
@@ -2666,6 +2762,13 @@ export function ReaderView({
                 : renderTextTocEntries(filteredTextChapters)}
             </nav>
           </>
+        ) : panelMode === 'map' ? (
+          <StoryMapPanel
+            chapters={storyMapChapters}
+            marks={marks}
+            activeIndex={activeTocChapterPosition}
+            onOpenChapter={openStoryMapChapter}
+          />
         ) : (
           <div className="reader-marks-list" aria-label="本书阅读记录">
             {marks.length > 0 ? marks.map((mark) => (

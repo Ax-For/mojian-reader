@@ -5,7 +5,10 @@ import { sampleBooks } from '../data/sampleBooks'
 import type { BookGroup, ReadingMark } from '../types'
 import { LibraryView } from './LibraryView'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  localStorage.clear()
+})
 
 const bookmark: ReadingMark = {
   id: 'bookmark-1',
@@ -121,6 +124,18 @@ describe('LibraryView interactions', () => {
     expect(props.onOpenMark).toHaveBeenCalledWith(bookmark)
     await user.click(screen.getByRole('button', { name: '删除第一章 清晨的书桌' }))
     expect(props.onDeleteMark).toHaveBeenCalledWith(bookmark.id)
+  })
+
+  it('opens a dedicated reading insights workspace from the primary navigation', async () => {
+    const user = userEvent.setup()
+    const { props, rerender } = renderLibrary()
+
+    await user.click(screen.getByRole('button', { name: '阅读洞察' }))
+    expect(props.onSectionChange).toHaveBeenCalledWith('insights')
+
+    rerender(<LibraryView {...props} section="insights" />)
+    expect(screen.getByRole('heading', { name: '阅读洞察' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '读完计划' })).toBeInTheDocument()
   })
 
   it('switches between library navigation and reading-mark filters', async () => {
@@ -246,6 +261,49 @@ describe('LibraryView interactions', () => {
     renderLibrary({ books: [measuredBook] })
 
     expect(within(screen.getByRole('button', { name: '打开人间草木' })).getByText('12 章 · 3.5 万字')).toBeInTheDocument()
+  })
+
+  it('filters books with rule-based smart shelves', async () => {
+    const user = userEvent.setup()
+    const now = Date.now()
+    const reading = { ...sampleBooks[0], id: 'smart-reading', progress: 45, lastOpened: now }
+    const finishing = { ...sampleBooks[1], id: 'smart-finishing', progress: 88, lastOpened: now - 60_000 }
+    const stalled = { ...sampleBooks[2], id: 'smart-stalled', progress: 24, lastOpened: now - 20 * 24 * 60 * 60_000 }
+    const unread = { ...sampleBooks[3], id: 'smart-unread', progress: 0, lastOpened: now }
+    const annotated = { ...bookmark, bookId: reading.id }
+    renderLibrary({ books: [reading, finishing, stalled, unread], marks: [annotated] })
+
+    await user.click(screen.getByRole('button', { name: '快读完 1 本' }))
+    let shelf = screen.getByTestId('book-shelf')
+    expect(within(shelf).getByRole('button', { name: '打开月亮与六便士' })).toBeInTheDocument()
+    expect(within(shelf).queryByRole('button', { name: '打开人间草木' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '搁置较久 1 本' }))
+    shelf = screen.getByTestId('book-shelf')
+    expect(within(shelf).getByRole('button', { name: '打开长夜行' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '有标注 1 本' }))
+    shelf = screen.getByTestId('book-shelf')
+    expect(within(shelf).getByRole('button', { name: '打开人间草木' })).toBeInTheDocument()
+  })
+
+  it('turns the continue area into a resume memory card', () => {
+    const recentBook = { ...sampleBooks[0], lastOpened: Date.now() }
+    localStorage.setItem('mojian-reading-resume-snapshots', JSON.stringify({
+      [recentBook.id]: {
+        bookId: recentBook.id,
+        chapterLabel: '第二章 一段安静的时间',
+        excerpt: '好的阅读界面不应该抢走注意力。',
+        progress: 64,
+        lastReadAt: Date.now() - 3 * 24 * 60 * 60_000
+      }
+    }))
+
+    renderLibrary({ books: [recentBook] })
+
+    expect(screen.getByText('上次停在 · 第二章 一段安静的时间')).toBeInTheDocument()
+    expect(screen.getByText('好的阅读界面不应该抢走注意力。')).toBeInTheDocument()
+    expect(screen.getByText('3 天前')).toBeInTheDocument()
   })
 
   it('exposes complete library backup and restore actions', async () => {

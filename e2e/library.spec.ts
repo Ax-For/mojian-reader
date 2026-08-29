@@ -13,6 +13,65 @@ test('reader flow from library to text appearance settings', async ({ page }) =>
   await expect(page.getByRole('heading', { name: '我的书架' })).toBeVisible()
 })
 
+test('smart shelves, resume memory and story map form a local reading loop', async ({ page }) => {
+  await page.goto('/')
+
+  await page.getByRole('button', { name: /正在阅读 3 本/ }).click()
+  await expect(page.getByRole('heading', { level: 1, name: '正在阅读' })).toBeVisible()
+  await expect(page.getByText(/已经开始、尚未读完的书，当前共 3 本/)).toBeVisible()
+  await page.getByRole('button', { name: /我的书架 4/ }).click()
+
+  await page.getByRole('button', { name: /继续阅读人间草木/ }).click()
+  await page.getByRole('button', { name: '故事地图' }).click()
+  const storyMap = page.getByRole('navigation', { name: '故事地图' })
+  await expect(storyMap.getByText(/已探索 \d+ \/ 4 章/)).toBeVisible()
+  await storyMap.getByRole('button', { name: '跳转到故事地图章节 第二章 一段安静的时间' }).click()
+  await page.waitForTimeout(550)
+
+  await page.getByRole('button', { name: '返回书架' }).click()
+  await expect(page.getByText('上次停在 · 第二章 一段安静的时间')).toBeVisible()
+  await expect(page.getByText(/好的阅读界面不应该抢走注意力/)).toBeVisible()
+})
+
+test('reading insights turns local activity into a goal, finish plan and annotation review', async ({ page }) => {
+  await page.addInitScript(() => {
+    const now = new Date()
+    const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    localStorage.setItem('mojian-reading-statistics', JSON.stringify({
+      'sample-renjian': {
+        bookId: 'sample-renjian',
+        totalReadingMs: 20 * 60_000,
+        sessionCount: 2,
+        lastReadAt: Date.now(),
+        dailyReadingMs: { [key]: 20 * 60_000 },
+        trackingStartedProgress: 50,
+        lastProgress: 64
+      }
+    }))
+  })
+  await page.goto('/')
+
+  await page.getByRole('button', { name: '阅读洞察' }).click()
+  await expect(page.getByRole('heading', { name: '阅读洞察' })).toBeVisible()
+  await expect(page.getByText('今日已读 20 分钟')).toBeVisible()
+  const goal = page.getByRole('slider', { name: '每日阅读目标' })
+  await goal.fill('45')
+  await expect(page.getByText('每日 45 分钟')).toBeVisible()
+
+  const plans = page.getByRole('region', { name: '读完计划' })
+  await plans.getByRole('button', { name: '继续阅读人间草木' }).click()
+  await expect(page.getByRole('heading', { name: '人间草木' })).toBeVisible()
+  await page.getByRole('button', { name: '添加标注' }).click()
+  await page.getByRole('textbox', { name: '标注内容' }).fill('从阅读洞察重新遇见这句话')
+  await page.getByRole('button', { name: '保存标注' }).click()
+  await page.getByRole('button', { name: '返回书架' }).click()
+
+  const review = page.getByRole('region', { name: '每日标注回顾' })
+  await expect(review.getByText('从阅读洞察重新遇见这句话')).toBeVisible()
+  await review.getByRole('button', { name: /回到/ }).click()
+  await expect(page.getByRole('heading', { name: '人间草木' })).toBeVisible()
+})
+
 test('bookmark survives the library round trip and jumps back into the reader', async ({ page }) => {
   await page.goto('/')
 
